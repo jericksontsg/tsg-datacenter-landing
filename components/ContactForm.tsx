@@ -1,4 +1,37 @@
+"use client";
+
+import { useState } from "react";
+
 export default function ContactForm() {
+  const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const [firstName, setFirstName] = useState("");
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setError(false);
+    const formData = new FormData(e.currentTarget);
+    setFirstName((formData.get("firstName") as string) || "");
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        body: JSON.stringify(Object.fromEntries(formData)),
+        headers: { "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        setSubmitted(true);
+      } else {
+        setError(true);
+      }
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <section id="contact" className="w-full bg-slate-50 px-6 py-20">
       <div className="mx-auto max-w-6xl">
@@ -10,65 +43,75 @@ export default function ContactForm() {
         </h2>
 
         <div className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-2">
-          {/* Form */}
-          <form
-            name="tsg-datacenter-contact"
-            method="POST"
-            data-netlify="true"
-            className="rounded-lg bg-white p-6 shadow-sm md:p-8"
-          >
-            <input
-              type="hidden"
-              name="form-name"
-              value="tsg-datacenter-contact"
-            />
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <Field id="firstName" label="First Name" />
-              <Field id="lastName" label="Last Name" />
-              <Field id="company" label="Company" className="sm:col-span-2" />
-              <Field
-                id="email"
-                label="Email"
-                type="email"
-                className="sm:col-span-2"
-              />
-              <Field
-                id="phone"
-                label="Phone"
-                type="tel"
-                className="sm:col-span-2"
-              />
-
-              <SelectField
-                id="location"
-                label="Project Location"
-                className="sm:col-span-2"
-                options={["USA", "Caribbean", "Mexico", "Other"]}
-              />
-              <SelectField
-                id="capacity"
-                label="Approximate Capacity"
-                options={["<10MW", "10-50MW", "50-200MW", "200+MW"]}
-              />
-              <SelectField
-                id="timeline"
-                label="Timeline"
-                options={[
-                  "Under 6mo",
-                  "6-12mo",
-                  "12-24mo",
-                  "Planning stage",
-                ]}
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-tsg-blue px-6 py-3 text-base font-medium text-white shadow-sm transition hover:bg-tsg-dark sm:w-auto"
+          {/* Left column: form OR success card */}
+          {submitted ? (
+            <SuccessCard firstName={firstName} />
+          ) : (
+            <form
+              onSubmit={handleSubmit}
+              className="rounded-lg bg-white p-6 shadow-sm md:p-8"
             >
-              Start My Assessment →
-            </button>
-          </form>
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field id="firstName" label="First Name" />
+                <Field id="lastName" label="Last Name" />
+                <Field id="company" label="Company" className="sm:col-span-2" />
+                <Field
+                  id="email"
+                  label="Email"
+                  type="email"
+                  className="sm:col-span-2"
+                />
+                <Field
+                  id="phone"
+                  label="Phone"
+                  type="tel"
+                  className="sm:col-span-2"
+                />
+
+                <SelectField
+                  id="location"
+                  label="Project Location"
+                  className="sm:col-span-2"
+                  options={["USA", "Caribbean", "Mexico", "Other"]}
+                />
+                <SelectField
+                  id="capacity"
+                  label="Approximate Capacity"
+                  options={["<10MW", "10-50MW", "50-200MW", "200+MW"]}
+                />
+                <SelectField
+                  id="timeline"
+                  label="Timeline"
+                  options={[
+                    "Under 6mo",
+                    "6-12mo",
+                    "12-24mo",
+                    "Planning stage",
+                  ]}
+                />
+              </div>
+
+              {error && (
+                <p className="mt-6 text-sm text-red-600">
+                  Something went wrong. Please email us directly at{" "}
+                  <a
+                    href="mailto:info@tsgwater.com"
+                    className="underline hover:text-red-700"
+                  >
+                    info@tsgwater.com
+                  </a>
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-tsg-blue px-6 py-3 text-base font-medium text-white shadow-sm transition hover:bg-tsg-dark disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {loading ? "Sending…" : "Start My Assessment →"}
+              </button>
+            </form>
+          )}
 
           {/* Right column */}
           <div className="space-y-6">
@@ -96,15 +139,50 @@ export default function ContactForm() {
               <ul className="mt-4 space-y-3 text-base text-slate-700">
                 <ExpectItem>Response within 1 business day</ExpectItem>
                 <ExpectItem>30-min discovery call</ExpectItem>
-                <ExpectItem>
-                  Preliminary assessment in 2–3 weeks
-                </ExpectItem>
+                <ExpectItem>Preliminary assessment in 2–3 weeks</ExpectItem>
               </ul>
             </div>
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function SuccessCard({ firstName }: { firstName: string }) {
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-white p-8 shadow-sm md:p-10">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100">
+        <svg
+          className="h-7 w-7 text-emerald-600"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            fillRule="evenodd"
+            d="M16.7 5.3a1 1 0 010 1.4l-7 7a1 1 0 01-1.4 0l-3-3a1 1 0 111.4-1.4L9 11.6l6.3-6.3a1 1 0 011.4 0z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </div>
+      <h3 className="mt-5 font-display text-2xl font-bold text-tsg-dark">
+        Thank you{firstName ? `, ${firstName}` : ""}.
+      </h3>
+      <p className="mt-3 text-base leading-relaxed text-slate-700">
+        We&apos;ll be in touch within 1 business day.
+      </p>
+      <p className="mt-2 text-sm text-slate-600">
+        In the meantime, you can reach us at{" "}
+        <a
+          href="mailto:info@tsgwater.com"
+          className="text-tsg-blue hover:underline"
+        >
+          info@tsgwater.com
+        </a>
+        .
+      </p>
+    </div>
   );
 }
 
