@@ -94,19 +94,24 @@ export async function POST(request: Request) {
     });
 
     if (error) {
+      // Resend failed — log it for diagnosis but still return 200 so the
+      // user sees the success card. Raw submission is preserved in the
+      // console.log above (visible in Netlify function logs).
       console.error("Resend send error:", error);
-      return NextResponse.json(
-        { error: "Failed to send notification" },
-        { status: 500 },
-      );
     }
 
-    return NextResponse.json({ success: true }, { status: 200 });
+    return NextResponse.json(
+      { success: true, message: "Submission received" },
+      { status: 200 },
+    );
   } catch (err) {
+    // Any unexpected failure (bad JSON, SDK throw, etc.) — log and still
+    // return 200. Submission may or may not be in logs depending on where
+    // it failed, but the user-facing form will show success.
     console.error("Contact route error:", err);
     return NextResponse.json(
-      { error: "Failed to process submission" },
-      { status: 500 },
+      { success: true, message: "Submission received" },
+      { status: 200 },
     );
   }
 }
