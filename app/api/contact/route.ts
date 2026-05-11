@@ -13,9 +13,10 @@ type ContactPayload = {
 };
 
 const LEAD_RECIPIENT = "info@tsgwater.com";
-// Quick-start sender. Once tsgwater.com is verified in Resend,
-// change this to "TSG Water Resources <noreply@tsgwater.com>".
-const FROM = "TSG Contact Form <onboarding@resend.dev>";
+// tsgwater.com is verified in Resend, so we send from the brand domain.
+// replyTo (set per-submission below) points back to the lead's email, so
+// when info@tsgwater.com hits "Reply" it goes directly to the prospect.
+const FROM = "TSG Water Resources <noreply@tsgwater.com>";
 
 function escapeHtml(s: string): string {
   return s
