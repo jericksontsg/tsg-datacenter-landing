@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -14,16 +14,23 @@ import {
 } from "chart.js";
 import { Bar } from "react-chartjs-2";
 import {
-  calcDailyGallons,
-  calcAnnualGallons,
+  calcDailyLiters,
+  calcAnnualLiters,
   calcWUEScore,
   calcROI,
-  formatGallons,
-  formatDollars,
   type CoolingType,
   type Climate,
   type ROIResult,
 } from "@/lib/calculatorLogic";
+import {
+  formatVolume,
+  formatDollars,
+  rateUnitLabel,
+  rateToPerM3,
+  convertRate,
+  litersToM3,
+} from "@/lib/units";
+import { useUnits } from "@/components/UnitsProvider";
 
 ChartJS.register(
   CategoryScale,
@@ -35,12 +42,18 @@ ChartJS.register(
 );
 
 type Step1Result = {
-  daily: number;
-  annual: number;
+  dailyLiters: number;
+  annualLiters: number;
   wue: string;
 };
 
+// Sensible defaults in each system (close to typical US utility pricing
+// vs comparable EU pricing, so the input feels familiar in either mode).
+const DEFAULT_WATER_RATE = { metric: 1.72, imperial: 6.5 } as const;
+const DEFAULT_SEWER_RATE = { metric: 0.92, imperial: 3.5 } as const;
+
 export default function WaterCalculator() {
+  const { system } = useUnits();
   const [step, setStep] = useState<1 | 2>(1);
 
   // Step 1 inputs
@@ -49,17 +62,27 @@ export default function WaterCalculator() {
   const [climate, setClimate] = useState<Climate>("arid");
   const [step1Result, setStep1Result] = useState<Step1Result | null>(null);
 
-  // Step 2 inputs
-  const [waterRate, setWaterRate] = useState(6.5);
-  const [sewerRate, setSewerRate] = useState(3.5);
+  // Step 2 inputs (stored in whatever system was active when entered)
+  const [waterRate, setWaterRate] = useState<number>(DEFAULT_WATER_RATE.metric);
+  const [sewerRate, setSewerRate] = useState<number>(DEFAULT_SEWER_RATE.metric);
   const [reuse, setReuse] = useState(60);
   const [roi, setRoi] = useState<ROIResult | null>(null);
 
+  // Track previous system so we can convert rate inputs on toggle
+  const [prevSystem, setPrevSystem] = useState(system);
+  useEffect(() => {
+    if (system !== prevSystem) {
+      setWaterRate((r) => convertRate(r, prevSystem, system));
+      setSewerRate((r) => convertRate(r, prevSystem, system));
+      setPrevSystem(system);
+    }
+  }, [system, prevSystem]);
+
   function runStep1() {
-    const daily = calcDailyGallons(itLoad, cooling, climate);
-    const annual = calcAnnualGallons(daily);
+    const dailyLiters = calcDailyLiters(itLoad, cooling, climate);
+    const annualLiters = calcAnnualLiters(dailyLiters);
     const wue = calcWUEScore(cooling, climate);
-    setStep1Result({ daily, annual, wue });
+    setStep1Result({ dailyLiters, annualLiters, wue });
   }
 
   function advanceToStep2() {
@@ -69,7 +92,10 @@ export default function WaterCalculator() {
 
   function runStep2() {
     if (!step1Result) return;
-    setRoi(calcROI(step1Result.annual, waterRate, sewerRate, reuse));
+    const annualM3 = litersToM3(step1Result.annualLiters);
+    const waterRatePerM3 = rateToPerM3(waterRate, system);
+    const sewerRatePerM3 = rateToPerM3(sewerRate, system);
+    setRoi(calcROI(annualM3, waterRatePerM3, sewerRatePerM3, reuse));
   }
 
   return (
@@ -104,7 +130,7 @@ export default function WaterCalculator() {
 
           {step === 2 && step1Result && (
             <Step2
-              annualGallons={step1Result.annual}
+              annualLiters={step1Result.annualLiters}
               waterRate={waterRate}
               setWaterRate={setWaterRate}
               sewerRate={sewerRate}
@@ -167,6 +193,7 @@ function Step1({
   result: Step1Result | null;
   onAdvance: () => void;
 }) {
+  const { system } = useUnits();
   return (
     <div>
       <h3 className="font-display text-xl font-bold text-tsg-dark">
@@ -240,10 +267,13 @@ function Step1({
       {result && (
         <div className="mt-8 space-y-6">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Metric label="Daily Gallons" value={formatGallons(result.daily)} />
             <Metric
-              label="Annual Gallons"
-              value={formatGallons(result.annual)}
+              label={`Daily Volume`}
+              value={formatVolume(result.dailyLiters, system)}
+            />
+            <Metric
+              label={`Annual Volume`}
+              value={formatVolume(result.annualLiters, system)}
             />
             <Metric label="WUE Score (L/kWh)" value={result.wue} />
           </div>
@@ -266,7 +296,7 @@ function Step1({
 function WUECallout({ wue }: { wue: number }) {
   let body: string;
   if (wue > 1.8) {
-    body = `Above industry average (${wue.toFixed(2)} vs 1.8 avg). Significant efficiency improvement opportunity.`;
+    body = `Above industry average (${wue.toFixed(2)} vs 1.8 avg L/kWh). Significant efficiency improvement opportunity.`;
   } else if (wue >= 0.5) {
     body =
       "Near industry average. Hyperscalers achieve ~0.5 L/kWh. TSG reuse systems close this gap.";
@@ -284,7 +314,7 @@ function WUECallout({ wue }: { wue: number }) {
 /* ---------- Step 2 ---------- */
 
 function Step2({
-  annualGallons,
+  annualLiters,
   waterRate,
   setWaterRate,
   sewerRate,
@@ -295,7 +325,7 @@ function Step2({
   onBack,
   roi,
 }: {
-  annualGallons: number;
+  annualLiters: number;
   waterRate: number;
   setWaterRate: (n: number) => void;
   sewerRate: number;
@@ -306,13 +336,15 @@ function Step2({
   onBack: () => void;
   roi: ROIResult | null;
 }) {
+  const { system } = useUnits();
+  const unit = rateUnitLabel(system);
   return (
     <div>
       <h3 className="font-display text-xl font-bold text-tsg-dark">
         2 — Water Reuse ROI Calculator
       </h3>
       <p className="mt-2 text-sm text-slate-600">
-        Based on annual demand of {formatGallons(annualGallons)}.
+        Based on annual demand of {formatVolume(annualLiters, system)}.
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-6">
@@ -320,14 +352,14 @@ function Step2({
           <RateField
             id="waterRate"
             label="Municipal Water Rate"
-            unit="$/1,000 gal"
+            unit={unit}
             value={waterRate}
             onChange={setWaterRate}
           />
           <RateField
             id="sewerRate"
             label="Discharge/Sewer Rate"
-            unit="$/1,000 gal"
+            unit={unit}
             value={sewerRate}
             onChange={setSewerRate}
           />
@@ -540,7 +572,7 @@ function RateField({
           type="number"
           step="0.01"
           min={0}
-          value={value}
+          value={Number.isFinite(value) ? value.toFixed(2) : 0}
           onChange={(e) => onChange(Number(e.target.value))}
           className="block w-full border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 focus:border-tsg-blue focus:outline-none focus:ring-1 focus:ring-tsg-blue"
         />

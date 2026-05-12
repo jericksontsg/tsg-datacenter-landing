@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Barlow_Condensed, DM_Sans } from "next/font/google";
 import "./globals.css";
+import { UnitsProvider } from "@/components/UnitsProvider";
+import UnitsToggle from "@/components/UnitsToggle";
 
 const barlowCondensed = Barlow_Condensed({
   subsets: ["latin"],
@@ -50,7 +52,12 @@ export default function RootLayout({
       className={`${barlowCondensed.variable} ${dmSans.variable}`}
       style={{ fontFamily: "var(--font-body)" }}
     >
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <UnitsProvider>
+          <UnitsToggle />
+          {children}
+        </UnitsProvider>
+      </body>
     </html>
   );
 }

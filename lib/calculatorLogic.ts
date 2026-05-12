@@ -1,7 +1,15 @@
+/**
+ * Water consumption + reuse ROI logic.
+ *
+ * All internal volumes are in LITERS (industry standard for water-use
+ * efficiency math). Conversion to m³ or US gallons happens in the
+ * presentation layer via lib/units.ts.
+ */
+
 export type CoolingType = "tower" | "air" | "liquid";
 export type Climate = "arid" | "humid" | "temperate" | "cold";
 
-// L/kWh
+// L/kWh — universally quoted regardless of unit system.
 export const WUE: Record<CoolingType, number> = {
   tower: 1.8,
   air: 0.2,
@@ -15,20 +23,20 @@ export const climateMult: Record<Climate, number> = {
   cold: 0.8,
 };
 
-const L_TO_GAL = 0.264172;
-
-export function calcDailyGallons(
+/**
+ * Liters consumed per day for a given IT load + cooling + climate.
+ * Math: IT_MW × 1000 kW/MW × 24 h × WUE (L/kWh) × climateMultiplier.
+ */
+export function calcDailyLiters(
   itLoadMW: number,
   coolingType: CoolingType,
   climate: Climate,
 ): number {
-  const liters =
-    itLoadMW * 1000 * 24 * WUE[coolingType] * climateMult[climate];
-  return Math.round(liters * L_TO_GAL);
+  return itLoadMW * 1000 * 24 * WUE[coolingType] * climateMult[climate];
 }
 
-export function calcAnnualGallons(dailyGallons: number): number {
-  return dailyGallons * 365;
+export function calcAnnualLiters(dailyLiters: number): number {
+  return dailyLiters * 365;
 }
 
 export function calcWUEScore(
@@ -45,37 +53,35 @@ export type ROIResult = {
   paybackYears: string | null;
 };
 
+/**
+ * ROI calculator working in canonical units ($/m³ and m³/yr) so the
+ * math is identical regardless of the user's display preference.
+ */
 export function calcROI(
-  annualGallons: number,
-  waterRate: number,
-  sewerRate: number,
+  annualM3: number,
+  waterRatePerM3: number,
+  sewerRatePerM3: number,
   reusePercent: number,
 ): ROIResult {
-  const totalRate = waterRate + sewerRate;
-  const currentCost = (annualGallons / 1000) * totalRate;
-  const newDemand = annualGallons * (1 - reusePercent / 100);
-  const projectedCost = (newDemand / 1000) * totalRate;
+  const totalRate = waterRatePerM3 + sewerRatePerM3;
+  const currentCost = annualM3 * totalRate;
+  const newDemandM3 = annualM3 * (1 - reusePercent / 100);
+  const projectedCost = newDemandM3 * totalRate;
   const annualSavings = currentCost - projectedCost;
-  const dailyGPM = annualGallons / 365 / 1440;
+
+  // CapEx model: $500k baseline + scale factor proportional to flow
+  // and reuse depth. Floor at $800k, cap at $25M. Original formula
+  // used "daily GPM" — convert m³/yr to GPM for compatibility.
+  const dailyGPM = (annualM3 * 264.172) / 365 / 1440;
   const capEx = Math.max(
-    800000,
-    Math.min(25000000, 500000 + dailyGPM * 6000 * (reusePercent / 60)),
+    800_000,
+    Math.min(
+      25_000_000,
+      500_000 + dailyGPM * 6000 * (reusePercent / 60),
+    ),
   );
   const paybackYears =
     annualSavings > 0 ? (capEx / annualSavings).toFixed(1) : null;
+
   return { currentCost, projectedCost, annualSavings, paybackYears };
-}
-
-export function formatGallons(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M gal`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K gal`;
-  return `${Math.round(n)} gal`;
-}
-
-export function formatDollars(n: number): string {
-  const sign = n < 0 ? "-" : "";
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${sign}$${Math.round(abs / 1_000)}K`;
-  return `${sign}$${Math.round(abs)}`;
 }

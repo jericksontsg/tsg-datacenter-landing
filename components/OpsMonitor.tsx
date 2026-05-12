@@ -14,10 +14,18 @@ import {
   type TooltipItem,
 } from "chart.js";
 import {
-  generateChartData,
-  formatGallons,
+  formatLabel,
+  type ProductionResponse,
   type Timeframe,
 } from "@/lib/plantData";
+import {
+  formatScaled,
+  formatShort,
+  m3ToGal,
+  galToM3,
+  volumeUnitLabel,
+} from "@/lib/units";
+import { useUnits } from "@/components/UnitsProvider";
 
 ChartJS.register(
   CategoryScale,
@@ -38,38 +46,113 @@ const TIMEFRAMES: Timeframe[] = ["1H", "24H", "7D", "30D"];
 const COLOR_PRODUCTION = "#378ADD";
 const COLOR_PRODUCTION_FILL = "rgba(55, 138, 221, 0.10)";
 
-function fmtShort(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${Math.round(n / 1_000)}K`;
-  return `${Math.round(n)}`;
+/**
+ * Convert a value from the API's reported unit into the user's
+ * preferred display unit (m³ for metric, gal for imperial).
+ * Returns NaN if we don't recognize the source unit — caller falls
+ * back to raw value + raw label.
+ */
+function toDisplayUnit(
+  value: number,
+  sourceUnit: string,
+  targetSystem: "metric" | "imperial",
+): number {
+  const src = sourceUnit.toLowerCase();
+  const isM3 = src === "m³" || src === "m3" || src === "cubic meters";
+  const isGal = src === "gallons" || src === "gal" || src === "us gallons";
+  const isLiters = src === "liters" || src === "litres" || src === "l";
+
+  // Normalize to m³ first
+  let m3: number;
+  if (isM3) m3 = value;
+  else if (isGal) m3 = galToM3(value);
+  else if (isLiters) m3 = value / 1000;
+  else return NaN;
+
+  return targetSystem === "metric" ? m3 : m3ToGal(m3);
 }
 
 export default function OpsMonitor() {
+  const { system } = useUnits();
   const [timeframe, setTimeframe] = useState<Timeframe>("1H");
   const [now, setNow] = useState<Date | null>(null);
+  const [production, setProduction] = useState<ProductionResponse | null>(
+    null,
+  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const chart = useMemo(() => generateChartData(timeframe), [timeframe]);
-
-  // Initialize timestamp on mount (client-only to avoid hydration mismatch)
+  // Timestamp tick (client-only to avoid hydration mismatch)
   useEffect(() => {
     setNow(new Date());
-  }, []);
-
-  // Timestamp tick (1s)
-  useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const totalProduced = chart.productionData.reduce((a, b) => a + b, 0);
+  // Fetch live telemetry whenever the timeframe changes
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    fetch(`/api/water-flows?timeframe=${timeframe}`, { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || `Telemetry error (HTTP ${res.status})`);
+        }
+        return res.json() as Promise<ProductionResponse>;
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setProduction(data);
+          setLoading(false);
+        }
+      })
+      .catch((err: Error) => {
+        if (!cancelled) {
+          setError(err.message || "Failed to reach telemetry source");
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [timeframe]);
+
+  // Derive display values from the API response in the user's units.
+  const displayUnit = volumeUnitLabel(system);
+  const series = useMemo(() => {
+    if (!production) return { labels: [], values: [] as number[] };
+    const labels = production.data.map((p) => formatLabel(p.timestamp, timeframe));
+    const values = production.data.map((p) => {
+      const converted = toDisplayUnit(p.value, production.unit, system);
+      return Number.isNaN(converted) ? p.value : converted;
+    });
+    return { labels, values };
+  }, [production, timeframe, system]);
+
+  const totalConverted = production
+    ? (() => {
+        const c = toDisplayUnit(production.total, production.unit, system);
+        return Number.isNaN(c) ? production.total : c;
+      })()
+    : 0;
+
+  // If unit recognition failed, show the API's reported unit verbatim.
+  const effectiveUnit =
+    production &&
+    Number.isNaN(toDisplayUnit(production.total, production.unit, system))
+      ? production.unit
+      : displayUnit;
 
   const data = {
-    labels: chart.labels,
+    labels: series.labels,
     datasets: [
       {
         label: "Production",
-        data: chart.productionData,
+        data: series.values,
         borderColor: COLOR_PRODUCTION,
         backgroundColor: COLOR_PRODUCTION_FILL,
         borderWidth: 2,
@@ -90,7 +173,7 @@ export default function OpsMonitor() {
       tooltip: {
         callbacks: {
           label: (ctx: TooltipItem<"line">) =>
-            formatGallons((ctx.parsed.y ?? 0) as number),
+            `${formatScaled((ctx.parsed.y ?? 0) as number)} ${effectiveUnit}`,
         },
       },
     },
@@ -100,7 +183,7 @@ export default function OpsMonitor() {
         position: "left",
         ticks: {
           color: COLOR_PRODUCTION,
-          callback: (v) => fmtShort(typeof v === "number" ? v : Number(v)),
+          callback: (v) => formatShort(typeof v === "number" ? v : Number(v)),
         },
         grid: { color: "rgba(128, 128, 128, 0.08)" },
       },
@@ -143,15 +226,23 @@ export default function OpsMonitor() {
             <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
               Total Water Produced
             </div>
-            <div className="mt-3 font-display text-5xl font-bold tabular-nums text-tsg-dark md:text-6xl lg:text-7xl">
-              {formatGallons(totalProduced)}
-            </div>
+            {loading ? (
+              <div className="mt-3 h-16 w-64 animate-pulse rounded bg-slate-200" />
+            ) : error ? (
+              <div className="mt-3 font-display text-2xl font-bold text-slate-400">
+                Telemetry unavailable
+              </div>
+            ) : (
+              <div className="mt-3 font-display text-5xl font-bold tabular-nums text-tsg-dark md:text-6xl lg:text-7xl">
+                {formatScaled(totalConverted)}{" "}
+                <span className="text-3xl text-slate-500 md:text-4xl lg:text-5xl">
+                  {effectiveUnit}
+                </span>
+              </div>
+            )}
             <div className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-emerald-600">
               <ArrowUp />
               Across all active TSG facilities
-            </div>
-            <div className="mt-1 text-xs text-slate-500">
-              +4.2% above rolling average
             </div>
           </div>
 
@@ -181,15 +272,29 @@ export default function OpsMonitor() {
           {/* Chart */}
           <div className="mt-4 -mx-2 overflow-x-auto px-2 sm:mx-0 sm:overflow-visible sm:px-0">
             <div className="relative h-60 min-h-[240px] min-w-[420px] sm:min-w-0">
-              <Line data={data} options={options} />
+              {loading ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                  Loading live telemetry…
+                </div>
+              ) : error ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm">
+                  <span className="font-medium text-slate-700">
+                    Couldn&apos;t reach the telemetry source.
+                  </span>
+                  <span className="max-w-md text-xs text-slate-500">
+                    {error}
+                  </span>
+                </div>
+              ) : (
+                <Line data={data} options={options} />
+              )}
             </div>
           </div>
 
           {/* Footer */}
           <div className="mt-6 flex items-center gap-2 border-t border-slate-200 pt-4 text-xs text-slate-500">
             <SatelliteIcon />
-            TSG SCADA telemetry integration in progress · Live data coming
-            soon
+            Live data via Scadiant SCADA telemetry
           </div>
         </div>
       </div>
