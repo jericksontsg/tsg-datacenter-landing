@@ -45,6 +45,24 @@ h3,
   animation: ops-pulse 2s ease-in-out infinite;
 }
 
+/* Hero flow graphic — animated dashed strokes simulate water moving
+   through inlet and outlet pipes. The end offset (-126) is the LCM of
+   the two dasharray cycle lengths (14 and 18) so both classes loop
+   seamlessly at any speed. */
+@keyframes flow-stream {
+  to {
+    stroke-dashoffset: -126;
+  }
+}
+
+.flow-anim {
+  animation: flow-stream 5s linear infinite;
+}
+
+.flow-anim-fast {
+  animation: flow-stream 3s linear infinite;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
