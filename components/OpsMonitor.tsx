@@ -299,9 +299,7 @@ export default function OpsMonitor() {
                 )}
                 <FlowMini />
                 <div className="mt-1 text-xs text-slate-500">
-                  {timeframe === "1H"
-                    ? "Current 1-minute reading"
-                    : `Avg over last ${timeframe === "24H" ? "hour" : "day"}`}
+                  Current flow rate
                 </div>
               </div>
             </div>
