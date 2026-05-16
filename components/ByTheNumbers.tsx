@@ -11,7 +11,7 @@ export default function ByTheNumbers() {
 
         <div className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-3">
           <Metric value="20+" label="Years EPC Delivery" />
-          <Metric value="3" label="Countries Active" />
+          <Metric value="9" label="Countries Active" />
           <Metric value="24/7" label="O&M Monitoring" />
         </div>
       </div>
