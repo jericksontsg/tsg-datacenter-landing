@@ -46,6 +46,23 @@ const TIMEFRAMES: Timeframe[] = ["1H", "24H", "7D", "30D"];
 const COLOR_PRODUCTION = "#378ADD";
 const COLOR_PRODUCTION_FILL = "rgba(55, 138, 221, 0.10)";
 
+// How many minutes each timeframe's bucket represents. Used to scale
+// the latest bucket value down to a per-minute flow rate so it's
+// comparable across timeframe selections.
+const BUCKET_MINUTES: Record<Timeframe, number> = {
+  "1H": 1,
+  "24H": 60,
+  "7D": 1440,
+  "30D": 1440,
+};
+
+function formatRate(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1000) return Math.round(n).toLocaleString("en-US");
+  if (abs >= 10) return n.toFixed(1);
+  return n.toFixed(2);
+}
+
 /**
  * Convert a value from the API's reported unit into the user's
  * preferred display unit (m³ for metric, gal for imperial).
@@ -147,6 +164,18 @@ export default function OpsMonitor() {
       ? production.unit
       : displayUnit;
 
+  // Current flow rate per minute — derived from the most recent bucket
+  // of the loaded series, scaled by how many minutes that bucket covers.
+  const flowPerMinute = production
+    ? (() => {
+        const last = production.data[production.data.length - 1];
+        if (!last) return 0;
+        const converted = toDisplayUnit(last.value, production.unit, system);
+        const raw = Number.isNaN(converted) ? last.value : converted;
+        return raw / BUCKET_MINUTES[timeframe];
+      })()
+    : 0;
+
   const data = {
     labels: series.labels,
     datasets: [
@@ -221,28 +250,60 @@ export default function OpsMonitor() {
             </div>
           </div>
 
-          {/* Single primary KPI */}
+          {/* Primary KPI panel: total on the left, current flow rate on the right */}
           <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-6 md:p-8">
-            <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-              Total Water Produced
-            </div>
-            {loading ? (
-              <div className="mt-3 h-16 w-64 animate-pulse rounded bg-slate-200" />
-            ) : error ? (
-              <div className="mt-3 font-display text-2xl font-bold text-slate-400">
-                Telemetry unavailable
+            <div className="grid grid-cols-1 gap-8 md:grid-cols-5 md:gap-10">
+              {/* Total Water Produced */}
+              <div className="md:col-span-3">
+                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                  Total Water Produced
+                </div>
+                {loading ? (
+                  <div className="mt-3 h-16 w-64 animate-pulse rounded bg-slate-200" />
+                ) : error ? (
+                  <div className="mt-3 font-display text-2xl font-bold text-slate-400">
+                    Telemetry unavailable
+                  </div>
+                ) : (
+                  <div className="mt-3 font-display text-4xl font-bold tabular-nums text-tsg-dark md:text-5xl lg:text-6xl">
+                    {formatScaled(totalConverted)}{" "}
+                    <span className="text-2xl text-slate-500 md:text-3xl lg:text-4xl">
+                      {effectiveUnit}
+                    </span>
+                  </div>
+                )}
+                <div className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-emerald-600">
+                  <ArrowUp />
+                  Across all active TSG facilities
+                </div>
               </div>
-            ) : (
-              <div className="mt-3 font-display text-5xl font-bold tabular-nums text-tsg-dark md:text-6xl lg:text-7xl">
-                {formatScaled(totalConverted)}{" "}
-                <span className="text-3xl text-slate-500 md:text-4xl lg:text-5xl">
-                  {effectiveUnit}
-                </span>
+
+              {/* Current flow rate + simplified graphic */}
+              <div className="md:col-span-2 md:border-l md:border-slate-200 md:pl-10">
+                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                  Flow Per Minute
+                </div>
+                {loading ? (
+                  <div className="mt-3 h-9 w-40 animate-pulse rounded bg-slate-200" />
+                ) : error ? (
+                  <div className="mt-3 font-display text-xl font-bold text-slate-400">
+                    —
+                  </div>
+                ) : (
+                  <div className="mt-3 font-display text-2xl font-bold tabular-nums text-tsg-dark md:text-3xl lg:text-4xl">
+                    {formatRate(flowPerMinute)}{" "}
+                    <span className="text-base text-slate-500 md:text-lg lg:text-xl">
+                      {effectiveUnit}/min
+                    </span>
+                  </div>
+                )}
+                <FlowMini />
+                <div className="mt-1 text-xs text-slate-500">
+                  {timeframe === "1H"
+                    ? "Current 1-minute reading"
+                    : `Avg over last ${timeframe === "24H" ? "hour" : "day"}`}
+                </div>
               </div>
-            )}
-            <div className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-emerald-600">
-              <ArrowUp />
-              Across all active TSG facilities
             </div>
           </div>
 
@@ -299,6 +360,39 @@ export default function OpsMonitor() {
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Minimal animated pipe-flow accent. Pure SVG + CSS keyframes from
+ * globals.css (.flow-anim). Sits beneath the Flow Per Minute readout.
+ */
+function FlowMini() {
+  return (
+    <div className="mt-4" aria-hidden="true">
+      <svg viewBox="0 0 120 16" className="h-3 w-full">
+        <rect
+          x="0"
+          y="4"
+          width="120"
+          height="8"
+          rx="4"
+          fill="#ffffff"
+          stroke="#cbd5e1"
+          strokeWidth="1"
+        />
+        <line
+          x1="3"
+          y1="8"
+          x2="117"
+          y2="8"
+          stroke="#378ADD"
+          strokeWidth="2"
+          strokeDasharray="6 4"
+          className="flow-anim"
+        />
+      </svg>
+    </div>
   );
 }
 
