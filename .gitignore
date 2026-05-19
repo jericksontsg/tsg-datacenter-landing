@@ -38,3 +38,8 @@ next-env.d.ts
 
 # Local Netlify folder
 .netlify
+
+# OpenNext + Wrangler build artifacts and local state
+.open-next
+.wrangler
+.dev.vars
