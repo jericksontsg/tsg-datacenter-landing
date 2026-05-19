@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
 
-// Run on Cloudflare Pages' edge runtime (Workers). Required for the
-// Cloudflare Pages + @cloudflare/next-on-pages build path.
-export const runtime = "edge";
-
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
 type ContactPayload = {

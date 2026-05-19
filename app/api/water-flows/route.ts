@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
 
-// Run on Cloudflare Pages' edge runtime (Workers). Required for the
-// Cloudflare Pages + @cloudflare/next-on-pages build path.
-export const runtime = "edge";
-
 const SCADIANT_BASE = "https://tcore.scadiant.ai/api/public/v1";
 const VALID_TIMEFRAMES = new Set(["1H", "24H", "7D", "30D"]);
 
