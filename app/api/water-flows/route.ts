@@ -19,8 +19,31 @@ export async function GET(request: Request) {
   const apiKey = getEnv("SCADIANT_API_KEY");
   if (!apiKey) {
     console.error("SCADIANT_API_KEY is not set");
+    // TEMPORARY diagnostic — surface which bindings ARE visible to the
+    // Worker so we can tell whether the secret is bound at all.
+    // Remove this debug block once the env var pipeline is sorted.
+    let cloudflareBindings: string[] = [];
+    try {
+      const cfModule = await import("@opennextjs/cloudflare");
+      const { env } = cfModule.getCloudflareContext();
+      cloudflareBindings = Object.keys(
+        (env as Record<string, unknown> | undefined) ?? {},
+      );
+    } catch (e) {
+      cloudflareBindings = [
+        `(getCloudflareContext threw: ${(e as Error).message})`,
+      ];
+    }
+    const processEnvKeys = Object.keys(process.env).filter(
+      (k) =>
+        !k.startsWith("npm_") &&
+        !["PATH", "HOME", "PWD", "USER", "SHELL"].includes(k),
+    );
     return NextResponse.json(
-      { error: "Telemetry source not configured" },
+      {
+        error: "Telemetry source not configured",
+        debug: { cloudflareBindings, processEnvKeys },
+      },
       { status: 503 },
     );
   }
