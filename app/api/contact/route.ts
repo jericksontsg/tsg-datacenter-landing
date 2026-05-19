@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getEnv } from "@/lib/env";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
@@ -38,7 +39,8 @@ export async function POST(request: Request) {
     const data = (await request.json()) as ContactPayload;
     console.log("New contact form submission:", data);
 
-    if (!process.env.RESEND_API_KEY) {
+    const resendApiKey = getEnv("RESEND_API_KEY");
+    if (!resendApiKey) {
       console.warn("RESEND_API_KEY not set — email send skipped");
       return NextResponse.json({ success: true }, { status: 200 });
     }
@@ -88,7 +90,7 @@ export async function POST(request: Request) {
     const resendRes = await fetch(RESEND_ENDPOINT, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        Authorization: `Bearer ${resendApiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

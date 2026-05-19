@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getEnv } from "@/lib/env";
 
 const SCADIANT_BASE = "https://tcore.scadiant.ai/api/public/v1";
 const VALID_TIMEFRAMES = new Set(["1H", "24H", "7D", "30D"]);
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const apiKey = process.env.SCADIANT_API_KEY;
+  const apiKey = getEnv("SCADIANT_API_KEY");
   if (!apiKey) {
     console.error("SCADIANT_API_KEY is not set");
     return NextResponse.json(
