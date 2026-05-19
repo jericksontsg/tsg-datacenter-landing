@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
 
 // Run on Cloudflare Pages' edge runtime (Workers). Required for the
 // Cloudflare Pages + @cloudflare/next-on-pages build path.
 export const runtime = "edge";
+
+const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
 type ContactPayload = {
   firstName?: string;
@@ -46,7 +47,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true }, { status: 200 });
     }
 
-    const resend = new Resend(process.env.RESEND_API_KEY);
     const fullName = `${v(data.firstName)} ${v(data.lastName)}`
       .replace(/—/g, "")
       .trim();
@@ -89,20 +89,28 @@ export async function POST(request: Request) {
       "Reply to this email to respond to the lead directly.",
     ].join("\n");
 
-    const { error } = await resend.emails.send({
-      from: FROM,
-      to: [LEAD_RECIPIENT],
-      subject,
-      html,
-      text,
-      ...(replyTo ? { replyTo } : {}),
+    const resendRes = await fetch(RESEND_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: FROM,
+        to: [LEAD_RECIPIENT],
+        subject,
+        html,
+        text,
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      }),
     });
 
-    if (error) {
+    if (!resendRes.ok) {
       // Resend failed — log it for diagnosis but still return 200 so the
       // user sees the success card. Raw submission is preserved in the
-      // console.log above (visible in Netlify function logs).
-      console.error("Resend send error:", error);
+      // console.log above (visible in function logs).
+      const body = await resendRes.text().catch(() => "");
+      console.error("Resend send error:", resendRes.status, body);
     }
 
     return NextResponse.json(
