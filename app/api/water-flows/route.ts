@@ -66,8 +66,14 @@ export async function GET(request: Request) {
     if (!upstream.ok) {
       const body = await upstream.text().catch(() => "");
       console.error("Scadiant upstream error:", upstream.status, body);
+      // TEMP diagnostic: include upstream response body in our response
+      // so we can see what Scadiant is complaining about.
       return NextResponse.json(
-        { error: "Upstream telemetry error", status: upstream.status },
+        {
+          error: "Upstream telemetry error",
+          status: upstream.status,
+          upstreamBody: body,
+        },
         { status: 502 },
       );
     }
