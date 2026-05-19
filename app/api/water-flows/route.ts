@@ -19,31 +19,8 @@ export async function GET(request: Request) {
   const apiKey = getEnv("SCADIANT_API_KEY");
   if (!apiKey) {
     console.error("SCADIANT_API_KEY is not set");
-    // TEMPORARY diagnostic — surface which bindings ARE visible to the
-    // Worker so we can tell whether the secret is bound at all.
-    // Remove this debug block once the env var pipeline is sorted.
-    let cloudflareBindings: string[] = [];
-    try {
-      const cfModule = await import("@opennextjs/cloudflare");
-      const { env } = cfModule.getCloudflareContext();
-      cloudflareBindings = Object.keys(
-        (env as Record<string, unknown> | undefined) ?? {},
-      );
-    } catch (e) {
-      cloudflareBindings = [
-        `(getCloudflareContext threw: ${(e as Error).message})`,
-      ];
-    }
-    const processEnvKeys = Object.keys(process.env).filter(
-      (k) =>
-        !k.startsWith("npm_") &&
-        !["PATH", "HOME", "PWD", "USER", "SHELL"].includes(k),
-    );
     return NextResponse.json(
-      {
-        error: "Telemetry source not configured",
-        debug: { cloudflareBindings, processEnvKeys },
-      },
+      { error: "Telemetry source not configured" },
       { status: 503 },
     );
   }
@@ -66,24 +43,8 @@ export async function GET(request: Request) {
     if (!upstream.ok) {
       const body = await upstream.text().catch(() => "");
       console.error("Scadiant upstream error:", upstream.status, body);
-      // TEMP diagnostic: full picture of the request + response.
-      const responseHeaders: Record<string, string> = {};
-      upstream.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
-      });
-      const apiKeyPreview = apiKey
-        ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)} (len ${apiKey.length})`
-        : "(not set)";
       return NextResponse.json(
-        {
-          error: "Upstream telemetry error",
-          status: upstream.status,
-          statusText: upstream.statusText,
-          upstreamBody: body,
-          requestUrl: url.toString(),
-          apiKeyPreview,
-          responseHeaders,
-        },
+        { error: "Upstream telemetry error", status: upstream.status },
         { status: 502 },
       );
     }
