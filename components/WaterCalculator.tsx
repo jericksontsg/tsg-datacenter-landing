@@ -75,6 +75,7 @@ export default function WaterCalculator() {
   const [waterRate, setWaterRate] = useState<number>(DEFAULT_WATER_RATE.metric);
   const [sewerRate, setSewerRate] = useState<number>(DEFAULT_SEWER_RATE.metric);
   const [reuse, setReuse] = useState(60);
+  const [opexPct, setOpexPct] = useState(20); // % of gross savings consumed by reuse-system OpEx
   const [roi, setRoi] = useState<ROIResult | null>(null);
 
   // Track previous system so we can convert rate inputs on toggle
@@ -104,7 +105,16 @@ export default function WaterCalculator() {
     const annualM3 = litersToM3(step1Result.annualLiters);
     const waterRatePerM3 = rateToPerM3(waterRate, system);
     const sewerRatePerM3 = rateToPerM3(sewerRate, system);
-    setRoi(calcROI(annualM3, waterRatePerM3, sewerRatePerM3, reuse));
+    setRoi(
+      calcROI(
+        annualM3,
+        waterRatePerM3,
+        sewerRatePerM3,
+        reuse,
+        climate,
+        opexPct / 100,
+      ),
+    );
   }
 
   return (
@@ -148,6 +158,8 @@ export default function WaterCalculator() {
               setSewerRate={setSewerRate}
               reuse={reuse}
               setReuse={setReuse}
+              opexPct={opexPct}
+              setOpexPct={setOpexPct}
               onCalculate={runStep2}
               onBack={() => setStep(1)}
               roi={roi}
@@ -360,6 +372,8 @@ function Step2({
   setSewerRate,
   reuse,
   setReuse,
+  opexPct,
+  setOpexPct,
   onCalculate,
   onBack,
   roi,
@@ -371,6 +385,8 @@ function Step2({
   setSewerRate: (n: number) => void;
   reuse: number;
   setReuse: (n: number) => void;
+  opexPct: number;
+  setOpexPct: (n: number) => void;
   onCalculate: () => void;
   onBack: () => void;
   roi: ROIResult | null;
@@ -433,6 +449,36 @@ function Step2({
           </div>
         </div>
 
+        {/* Reuse-system OpEx slider */}
+        <div>
+          <div className="flex items-center justify-between">
+            <label
+              htmlFor="opexPct"
+              className="text-sm font-medium text-slate-700"
+            >
+              Reuse System OpEx (% of gross savings)
+            </label>
+            <span className="font-display text-lg font-bold text-tsg-blue">
+              {opexPct}%
+            </span>
+          </div>
+          <input
+            id="opexPct"
+            type="range"
+            min={5}
+            max={35}
+            step={1}
+            value={opexPct}
+            onChange={(e) => setOpexPct(Number(e.target.value))}
+            className="mt-2 w-full accent-tsg-blue"
+          />
+          <div className="mt-1 flex justify-between text-xs text-slate-500">
+            <span>5% Best-case</span>
+            <span>20% Typical</span>
+            <span>35% Heavy treatment</span>
+          </div>
+        </div>
+
         <div className="flex flex-col gap-3 sm:flex-row">
           <button
             type="button"
@@ -463,8 +509,9 @@ function Step2({
               value={formatDollars(roi.projectedCost)}
             />
             <Metric
-              label="Annual Savings"
+              label="Net Annual Savings"
               value={formatDollars(roi.annualSavings)}
+              sub={`Gross ${formatDollars(roi.grossSavings)} − OpEx ${formatDollars(roi.opexCost)}`}
             />
             <Metric
               label="Estimated CapEx"
@@ -500,7 +547,7 @@ function Step2({
 
 function ROIChart({ roi }: { roi: ROIResult }) {
   const data = {
-    labels: ["Current Annual Cost", "Projected with TSG", "Annual Savings"],
+    labels: ["Current Annual Cost", "Projected with TSG", "Net Annual Savings"],
     datasets: [
       {
         label: "Dollars",
@@ -541,7 +588,15 @@ function ROIChart({ roi }: { roi: ROIResult }) {
 
 /* ---------- Shared bits ---------- */
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+}) {
   return (
     <div className="rounded-lg bg-white p-5 shadow-sm">
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -550,6 +605,9 @@ function Metric({ label, value }: { label: string; value: string }) {
       <div className="mt-2 font-display text-3xl font-bold text-tsg-dark md:text-4xl">
         {value}
       </div>
+      {sub && (
+        <div className="mt-1 text-xs leading-snug text-slate-500">{sub}</div>
+      )}
     </div>
   );
 }

@@ -192,13 +192,31 @@ export function wueBenchmarkBand(wue: number): {
 }
 
 // ─── Stage 2 — Reuse ROI ─────────────────────────────────────────────────────
-// The ROI math from v1 was conceptually fine — kept intact, but with
-// clearer commentary about what it does and does not model.
+
+/**
+ * Peak-day flow multiplier vs annual-average flow, by climate.
+ * Real water treatment systems are sized for peak day, not annual average.
+ * Hot/arid sites can run 1.5-1.8× the annual mean on the hottest days;
+ * cold sites are nearly flat. Used to scale CapEx to realistic sizing.
+ *
+ * ENGINEERING NOTE: These are conservative defaults from industry sizing
+ * heuristics. TSG should calibrate against measured peak-to-average ratios
+ * from operational sites.
+ */
+export const CLIMATE_PEAK_FACTOR: Record<Climate, number> = {
+  arid: 1.7,
+  humid: 1.4,
+  temperate: 1.2,
+  cool: 1.1,
+  cold: 1.05,
+};
 
 export type ROIResult = {
   currentCost: number;
   projectedCost: number;
-  annualSavings: number;
+  grossSavings: number; // water-bill avoidance before reuse-system OpEx
+  opexCost: number; // running cost of the reuse system
+  annualSavings: number; // = grossSavings − opexCost (the net number)
   capEx: number;
   paybackYears: string | null;
 };
@@ -207,40 +225,66 @@ export type ROIResult = {
  * ROI calculator working in canonical units ($/m³ and m³/yr) so the
  * math is independent of UI unit toggle.
  *
- * LIMITATIONS (flag to prospects):
- *   - Treats sewer cost as 1:1 avoidable by reuse. Many utilities meter
- *     and price differently. A real assessment models actual tariff.
- *   - Does NOT include reuse system OpEx (chemicals, energy, labor).
- *     A rule-of-thumb is ~15-25% of gross water savings.
- *   - Does NOT include rate inflation, demand surcharges, or curtailment
- *     risk pricing. Real deals model these.
- *   - Assumes year-round reuse at target percentage. Seasonal designs
- *     (reuse only during hot months) save less but cost less.
+ * Models THREE adjustments beyond the gross-savings baseline:
+ *   1. opexFraction: subtracts reuse-system running cost (chemicals,
+ *      energy, labor, membrane amortization) from gross savings before
+ *      computing payback. Default 0.20 = 20% of gross savings.
+ *   2. climate peak factor: CapEx sized for peak-day flow, not annual
+ *      mean. Hot/arid sites get sized roughly 1.7× larger than the
+ *      same annual volume in a cold climate.
+ *   3. Net vs gross savings exposed separately so prospects see what
+ *      the OpEx assumption costs them.
+ *
+ * REMAINING LIMITATIONS (still flag to prospects):
+ *   - Treats sewer cost as 1:1 avoidable by reuse. Correct when utility
+ *     bills sewer based on water-supply meter (common US pattern). If
+ *     the utility uses a separate discharge meter, the absolute savings
+ *     dollars overstate — payback years remain approximately correct
+ *     because both sides of the ratio inflate equally.
+ *   - Simple payback only; ignores time value of money and rate
+ *     inflation. NPV at TSG's cost of capital is the engineering-grade
+ *     metric — use that internally when pricing real deals.
+ *   - Assumes year-round reuse at the slider's target %. Seasonal
+ *     designs (reuse only during arid months) save less but cost less.
+ *   - CapEx coefficients ($500K base, $6K per peak-GPM, $800K floor,
+ *     $25M cap) are placeholders. Calibrate against TSG proposal
+ *     history for real-deal accuracy.
  */
 export function calcROI(
   annualM3: number,
   waterRatePerM3: number,
   sewerRatePerM3: number,
   reusePercent: number,
+  climate: Climate,
+  opexFraction: number = 0.2,
 ): ROIResult {
   const totalRate = waterRatePerM3 + sewerRatePerM3;
   const currentCost = annualM3 * totalRate;
   const newDemandM3 = annualM3 * (1 - reusePercent / 100);
   const projectedCost = newDemandM3 * totalRate;
-  const annualSavings = currentCost - projectedCost;
+  const grossSavings = currentCost - projectedCost;
+  const opexCost = Math.max(0, grossSavings * opexFraction);
+  const annualSavings = grossSavings - opexCost;
 
-  // CapEx model: order-of-magnitude budget.
-  // Baseline + scale term proportional to peak flow and reuse depth.
-  // ENGINEERING NOTE: these coefficients are placeholder rules-of-thumb.
-  // TSG's engineering team should calibrate against actual proposal
-  // history before using these numbers in a customer-facing deal.
-  const dailyGPM = (annualM3 * 264.172) / 365 / 1440;
-  const capExRaw =
-    500_000 + dailyGPM * 6_000 * (reusePercent / 60);
+  // CapEx model — now scaled by PEAK flow, not annual-average flow.
+  // avgGPM is the annual mean; multiplying by the climate peak factor
+  // gives a sizing flow that reflects what the treatment train actually
+  // needs to handle on the hottest day.
+  const avgGPM = (annualM3 * 264.172) / 365 / 1440;
+  const peakGPM = avgGPM * CLIMATE_PEAK_FACTOR[climate];
+  const capExRaw = 500_000 + peakGPM * 6_000 * (reusePercent / 60);
   const capEx = Math.max(800_000, Math.min(25_000_000, capExRaw));
 
   const paybackYears =
     annualSavings > 0 ? (capEx / annualSavings).toFixed(1) : null;
 
-  return { currentCost, projectedCost, annualSavings, capEx, paybackYears };
+  return {
+    currentCost,
+    projectedCost,
+    grossSavings,
+    opexCost,
+    annualSavings,
+    capEx,
+    paybackYears,
+  };
 }
