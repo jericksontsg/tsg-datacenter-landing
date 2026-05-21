@@ -16,9 +16,11 @@ import { Bar } from "react-chartjs-2";
 import {
   calcDailyLiters,
   calcAnnualLiters,
-  calcWUEScore,
+  calcWUE,
   calcROI,
-  type CoolingType,
+  wueBenchmarkBand,
+  DEFAULT_PUE,
+  type HeatRejectionMethod,
   type Climate,
   type ROIResult,
 } from "@/lib/calculatorLogic";
@@ -44,7 +46,7 @@ ChartJS.register(
 type Step1Result = {
   dailyLiters: number;
   annualLiters: number;
-  wue: string;
+  wue: number;
 };
 
 // Sensible defaults in each system (close to typical US utility pricing
@@ -58,9 +60,16 @@ export default function WaterCalculator() {
 
   // Step 1 inputs
   const [itLoad, setItLoad] = useState(20);
-  const [cooling, setCooling] = useState<CoolingType>("tower");
+  const [method, setMethod] = useState<HeatRejectionMethod>("evaporative");
+  const [pue, setPue] = useState<number>(DEFAULT_PUE.evaporative);
   const [climate, setClimate] = useState<Climate>("arid");
   const [step1Result, setStep1Result] = useState<Step1Result | null>(null);
+
+  // PUE default snaps to the method's typical value whenever the user
+  // changes heat rejection method. They can still override the slider.
+  useEffect(() => {
+    setPue(DEFAULT_PUE[method]);
+  }, [method]);
 
   // Step 2 inputs (stored in whatever system was active when entered)
   const [waterRate, setWaterRate] = useState<number>(DEFAULT_WATER_RATE.metric);
@@ -79,9 +88,9 @@ export default function WaterCalculator() {
   }, [system, prevSystem]);
 
   function runStep1() {
-    const dailyLiters = calcDailyLiters(itLoad, cooling, climate);
-    const annualLiters = calcAnnualLiters(dailyLiters);
-    const wue = calcWUEScore(cooling, climate);
+    const dailyLiters = calcDailyLiters(itLoad, pue, method, climate);
+    const annualLiters = calcAnnualLiters(itLoad, pue, method, climate);
+    const wue = calcWUE(pue, method, climate);
     setStep1Result({ dailyLiters, annualLiters, wue });
   }
 
@@ -118,8 +127,10 @@ export default function WaterCalculator() {
             <Step1
               itLoad={itLoad}
               setItLoad={setItLoad}
-              cooling={cooling}
-              setCooling={setCooling}
+              pue={pue}
+              setPue={setPue}
+              method={method}
+              setMethod={setMethod}
               climate={climate}
               setClimate={setClimate}
               onCalculate={runStep1}
@@ -175,8 +186,10 @@ function ProgressBar({ step }: { step: 1 | 2 }) {
 function Step1({
   itLoad,
   setItLoad,
-  cooling,
-  setCooling,
+  pue,
+  setPue,
+  method,
+  setMethod,
   climate,
   setClimate,
   onCalculate,
@@ -185,8 +198,10 @@ function Step1({
 }: {
   itLoad: number;
   setItLoad: (n: number) => void;
-  cooling: CoolingType;
-  setCooling: (c: CoolingType) => void;
+  pue: number;
+  setPue: (n: number) => void;
+  method: HeatRejectionMethod;
+  setMethod: (m: HeatRejectionMethod) => void;
   climate: Climate;
   setClimate: (c: Climate) => void;
   onCalculate: () => void;
@@ -229,16 +244,44 @@ function Step1({
           </div>
         </div>
 
+        {/* PUE slider */}
+        <div>
+          <div className="flex items-center justify-between">
+            <label htmlFor="pue" className="text-sm font-medium text-slate-700">
+              PUE (Power Usage Effectiveness)
+            </label>
+            <span className="font-display text-lg font-bold text-tsg-blue">
+              {pue.toFixed(2)}
+            </span>
+          </div>
+          <input
+            id="pue"
+            type="range"
+            min={1.05}
+            max={2.0}
+            step={0.05}
+            value={pue}
+            onChange={(e) => setPue(Number(e.target.value))}
+            className="mt-2 w-full accent-tsg-blue"
+          />
+          <div className="mt-1 flex justify-between text-xs text-slate-500">
+            <span>1.05 (Hyperscale)</span>
+            <span>1.4 (Modern)</span>
+            <span>2.0 (Legacy)</span>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <Select
-            id="cooling"
-            label="Cooling Type"
-            value={cooling}
-            onChange={(v) => setCooling(v as CoolingType)}
+            id="method"
+            label="Heat Rejection Method"
+            value={method}
+            onChange={(v) => setMethod(v as HeatRejectionMethod)}
             options={[
-              { value: "tower", label: "Evaporative (Cooling Towers)" },
-              { value: "air", label: "Air-Cooled" },
-              { value: "liquid", label: "Direct Liquid Cooling" },
+              { value: "evaporative", label: "Evaporative cooling tower (wet)" },
+              { value: "hybrid", label: "Hybrid / adiabatic (wet-dry)" },
+              { value: "dry", label: "Air-cooled / dry coolers" },
+              { value: "economized", label: "Hyperscale economized + minimal evap" },
             ]}
           />
           <Select
@@ -247,10 +290,11 @@ function Step1({
             value={climate}
             onChange={(v) => setClimate(v as Climate)}
             options={[
-              { value: "arid", label: "Arid/Hot (TX, AZ, NV)" },
-              { value: "humid", label: "Hot/Humid (FL, SE)" },
-              { value: "temperate", label: "Temperate (CA, PNW)" },
-              { value: "cold", label: "Cold (Northeast, Midwest)" },
+              { value: "arid", label: "Hot/Arid (TX, AZ, NV)" },
+              { value: "humid", label: "Hot/Humid (FL, SE, Singapore)" },
+              { value: "temperate", label: "Temperate (N. CA, NC)" },
+              { value: "cool", label: "Cool (PNW, Northeast)" },
+              { value: "cold", label: "Cold (Quebec, N. Europe)" },
             ]}
           />
         </div>
@@ -275,10 +319,13 @@ function Step1({
               label={`Annual Volume`}
               value={formatVolume(result.annualLiters, system)}
             />
-            <Metric label="WUE Score (L/kWh)" value={result.wue} />
+            <Metric
+              label="Effective WUE (L/kWh IT)"
+              value={result.wue.toFixed(2)}
+            />
           </div>
 
-          <WUECallout wue={parseFloat(result.wue)} />
+          <WUECallout wue={result.wue} />
 
           <button
             type="button"
@@ -294,18 +341,10 @@ function Step1({
 }
 
 function WUECallout({ wue }: { wue: number }) {
-  let body: string;
-  if (wue > 1.8) {
-    body = `Above industry average (${wue.toFixed(2)} vs 1.8 avg L/kWh). Significant efficiency improvement opportunity.`;
-  } else if (wue >= 0.5) {
-    body =
-      "Near industry average. Hyperscalers achieve ~0.5 L/kWh. TSG reuse systems close this gap.";
-  } else {
-    body =
-      "Strong WUE — near hyperscaler benchmark. TSG O&M can protect this performance.";
-  }
+  const { label, body } = wueBenchmarkBand(wue);
   return (
     <div className="rounded-md border-l-4 border-tsg-blue bg-tsg-light p-4 text-sm leading-relaxed text-slate-800 md:text-base">
+      <div className="mb-1 font-semibold text-tsg-dark">{label}</div>
       {body}
     </div>
   );
@@ -414,7 +453,7 @@ function Step2({
 
       {roi && (
         <div className="mt-8 space-y-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <Metric
               label="Current Annual Cost"
               value={formatDollars(roi.currentCost)}
@@ -426,6 +465,10 @@ function Step2({
             <Metric
               label="Annual Savings"
               value={formatDollars(roi.annualSavings)}
+            />
+            <Metric
+              label="Estimated CapEx"
+              value={formatDollars(roi.capEx)}
             />
             <Metric
               label="Simple Payback"
