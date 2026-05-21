@@ -1,12 +1,74 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Script from "next/script";
+
+// Loose type for the Turnstile global. Cloudflare's runtime API:
+// https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/
+type TurnstileGlobal = {
+  render: (
+    el: HTMLElement,
+    options: {
+      sitekey: string;
+      callback?: (token: string) => void;
+      "expired-callback"?: () => void;
+      "error-callback"?: () => void;
+      theme?: "light" | "dark" | "auto";
+    },
+  ) => string;
+  reset: (widgetId?: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileGlobal;
+  }
+}
+
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 export default function ContactForm() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [firstName, setFirstName] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const widgetRef = useRef<HTMLDivElement>(null);
+  const widgetIdRef = useRef<string | null>(null);
+
+  // Render Turnstile widget when the script and the container are both ready.
+  // Polls briefly because the script may load after first paint.
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return;
+    let cancelled = false;
+    let attempts = 0;
+
+    const tryRender = () => {
+      if (cancelled) return;
+      attempts += 1;
+      if (
+        typeof window !== "undefined" &&
+        window.turnstile &&
+        widgetRef.current &&
+        !widgetIdRef.current
+      ) {
+        widgetIdRef.current = window.turnstile.render(widgetRef.current, {
+          sitekey: TURNSTILE_SITE_KEY,
+          callback: (token) => setTurnstileToken(token),
+          "expired-callback": () => setTurnstileToken(null),
+          "error-callback": () => setTurnstileToken(null),
+          theme: "light",
+        });
+      } else if (attempts < 60) {
+        setTimeout(tryRender, 200);
+      }
+    };
+    tryRender();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -14,16 +76,25 @@ export default function ContactForm() {
     setError(false);
     const formData = new FormData(e.currentTarget);
     setFirstName((formData.get("firstName") as string) || "");
+    const payload = {
+      ...Object.fromEntries(formData),
+      ...(turnstileToken ? { turnstileToken } : {}),
+    };
     try {
       const res = await fetch("/api/contact", {
         method: "POST",
-        body: JSON.stringify(Object.fromEntries(formData)),
+        body: JSON.stringify(payload),
         headers: { "Content-Type": "application/json" },
       });
       if (res.ok) {
         setSubmitted(true);
       } else {
         setError(true);
+        // Reset the Turnstile widget so the user can re-verify on retry.
+        if (window.turnstile && widgetIdRef.current) {
+          window.turnstile.reset(widgetIdRef.current);
+          setTurnstileToken(null);
+        }
       }
     } catch {
       setError(true);
@@ -32,8 +103,19 @@ export default function ContactForm() {
     }
   }
 
+  // The submit button is disabled while loading, OR (when Turnstile is
+  // configured) until the user has been verified.
+  const turnstileBlocking = Boolean(TURNSTILE_SITE_KEY) && !turnstileToken;
+  const submitDisabled = loading || turnstileBlocking;
+
   return (
     <section id="contact" className="w-full bg-slate-50 px-6 py-20">
+      {TURNSTILE_SITE_KEY && (
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+          strategy="lazyOnload"
+        />
+      )}
       <div className="mx-auto max-w-6xl">
         <p className="text-sm font-semibold tracking-widest text-tsg-blue">
           GET STARTED
@@ -91,6 +173,15 @@ export default function ContactForm() {
                 />
               </div>
 
+              {/* Cloudflare Turnstile widget — only rendered when the
+                  site key env var is set. Container is left empty
+                  otherwise so layout doesn't shift. */}
+              {TURNSTILE_SITE_KEY && (
+                <div className="mt-6">
+                  <div ref={widgetRef} />
+                </div>
+              )}
+
               {error && (
                 <p className="mt-6 text-sm text-red-600">
                   Something went wrong. Please email us directly at{" "}
@@ -105,10 +196,14 @@ export default function ContactForm() {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={submitDisabled}
                 className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-tsg-blue px-6 py-3 text-base font-medium text-white shadow-sm transition hover:bg-tsg-dark disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
-                {loading ? "Sending…" : "Start My Assessment →"}
+                {loading
+                  ? "Sending…"
+                  : turnstileBlocking
+                    ? "Verifying you're human…"
+                    : "Start My Assessment →"}
               </button>
             </form>
           )}

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getEnv } from "@/lib/env";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
+const TURNSTILE_VERIFY_ENDPOINT =
+  "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 type ContactPayload = {
   firstName?: string;
@@ -12,6 +14,7 @@ type ContactPayload = {
   location?: string;
   capacity?: string;
   timeline?: string;
+  turnstileToken?: string;
 };
 
 const LEAD_RECIPIENT = "info@tsgwater.com";
@@ -37,7 +40,47 @@ function v(s: string | undefined): string {
 export async function POST(request: Request) {
   try {
     const data = (await request.json()) as ContactPayload;
-    console.log("New contact form submission:", data);
+    // Log without the Turnstile token (just noise in logs).
+    const { turnstileToken: _t, ...logData } = data;
+    void _t;
+    console.log("New contact form submission:", logData);
+
+    // Cloudflare Turnstile verification. If a secret key is configured,
+    // require a valid token. If no secret key is set, skip verification
+    // gracefully so dev/preview environments keep working.
+    const turnstileSecret = getEnv("TURNSTILE_SECRET_KEY");
+    if (turnstileSecret) {
+      const token = data.turnstileToken;
+      if (!token) {
+        console.warn("Turnstile token missing on submission");
+        return NextResponse.json(
+          { error: "Human verification required. Please re-verify and resubmit." },
+          { status: 400 },
+        );
+      }
+      const verifyRes = await fetch(TURNSTILE_VERIFY_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          secret: turnstileSecret,
+          response: token,
+        }).toString(),
+      });
+      const verifyJson = (await verifyRes.json().catch(() => ({}))) as {
+        success?: boolean;
+        "error-codes"?: string[];
+      };
+      if (!verifyJson.success) {
+        console.warn(
+          "Turnstile verification failed:",
+          verifyJson["error-codes"],
+        );
+        return NextResponse.json(
+          { error: "Human verification failed. Please refresh and try again." },
+          { status: 400 },
+        );
+      }
+    }
 
     const resendApiKey = getEnv("RESEND_API_KEY");
     if (!resendApiKey) {
