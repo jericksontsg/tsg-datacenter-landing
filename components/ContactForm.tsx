@@ -128,7 +128,7 @@ export default function ContactForm() {
                 </a>
               </p>
               <p className="mt-2 text-sm text-slate-600">
-                Miami FL · Caribbean · Mexico City
+                USA · The Caribbean · Mexico
               </p>
             </div>
 
