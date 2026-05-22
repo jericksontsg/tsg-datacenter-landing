@@ -150,6 +150,11 @@ export default function OpsMonitor() {
   const currentProduction =
     production && production.timeframe === timeframe ? production : null;
   const isWaitingForFreshData = !error && (loading || !currentProduction);
+  // Defensive empty-state: Scadiant sometimes returns a zero-volume window
+  // for the active timeframe (SCADA ingestion stalled, source offline, etc.)
+  // Rather than render a flat-line-at-zero chart and a "0 gal" headline —
+  // both of which look broken to a prospect — we surface a friendly state.
+  const hasNoTelemetry = !!currentProduction && currentProduction.total === 0;
 
   const displayUnit = volumeUnitLabel(system);
   const series = useMemo(() => {
@@ -289,6 +294,10 @@ export default function OpsMonitor() {
                   <div className="mt-3 font-display text-2xl font-bold text-slate-400">
                     Telemetry unavailable
                   </div>
+                ) : hasNoTelemetry ? (
+                  <div className="mt-3 font-display text-2xl font-bold text-slate-400">
+                    Awaiting telemetry
+                  </div>
                 ) : (
                   <div className="mt-3 font-display text-4xl font-bold tabular-nums text-tsg-dark md:text-5xl lg:text-6xl">
                     {formatScaled(totalConverted)}{" "}
@@ -310,7 +319,7 @@ export default function OpsMonitor() {
                 </div>
                 {isWaitingForFreshData ? (
                   <div className="mt-3 h-9 w-40 animate-pulse rounded bg-slate-200" />
-                ) : error ? (
+                ) : error || hasNoTelemetry ? (
                   <div className="mt-3 font-display text-xl font-bold text-slate-400">
                     —
                   </div>
@@ -367,6 +376,17 @@ export default function OpsMonitor() {
                   </span>
                   <span className="max-w-md text-xs text-slate-500">
                     {error}
+                  </span>
+                </div>
+              ) : hasNoTelemetry ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm">
+                  <span className="font-medium text-slate-700">
+                    Awaiting fresh telemetry for this window.
+                  </span>
+                  <span className="max-w-md text-xs text-slate-500">
+                    {timeframe === "1H"
+                      ? "Per-minute readings haven't landed yet. Try the 24H view for historical data."
+                      : "No production reported for the selected window."}
                   </span>
                 </div>
               ) : (
