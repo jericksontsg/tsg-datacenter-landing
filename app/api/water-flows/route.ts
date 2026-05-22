@@ -35,9 +35,11 @@ export async function GET(request: Request) {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
       },
-      // Cache server-side for 30s so a viral page-share doesn't hammer
-      // Scadiant. Each unique timeframe is cached independently.
-      next: { revalidate: 30 },
+      // Opt out of the Next.js Data Cache. Scadiant sends Cache-Control:
+      // no-store, but Next.js ignores upstream cache headers and caches
+      // by URL by default — we have to declare it per-call. Every render
+      // now hits Scadiant fresh; the chart never serves stale buckets.
+      cache: "no-store",
     });
 
     if (!upstream.ok) {
@@ -52,8 +54,9 @@ export async function GET(request: Request) {
     const data = await upstream.json();
     return NextResponse.json(data, {
       status: 200,
-      // Let CDN edges hold this for the same 30s window.
-      headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },
+      // Also disable any CDN-edge caching of OUR route's response — would
+      // otherwise re-introduce the staleness one layer further out.
+      headers: { "Cache-Control": "no-store" },
     });
   } catch (err) {
     console.error("water-flows route error:", err);
