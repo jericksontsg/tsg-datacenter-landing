@@ -139,38 +139,63 @@ export default function OpsMonitor() {
   }, [timeframe]);
 
   // Derive display values from the API response in the user's units.
+  // IMPORTANT: only treat `production` as current when its `timeframe`
+  // field matches the user's active selection. When the user clicks a
+  // different timeframe button, React re-renders with the NEW timeframe
+  // but the OLD production data still in state (until the new fetch
+  // resolves). Without this guard, the chart briefly plots the old
+  // data using the new timeframe's label format — looks like a
+  // "flatline" because, e.g., 24 hourly buckets plotted against
+  // 60 per-minute labels collapse most of the chart to flat segments.
+  const currentProduction =
+    production && production.timeframe === timeframe ? production : null;
+  const isWaitingForFreshData = !error && (loading || !currentProduction);
+
   const displayUnit = volumeUnitLabel(system);
   const series = useMemo(() => {
-    if (!production) return { labels: [], values: [] as number[] };
-    const labels = production.data.map((p) => formatLabel(p.timestamp, timeframe));
-    const values = production.data.map((p) => {
-      const converted = toDisplayUnit(p.value, production.unit, system);
+    if (!currentProduction) return { labels: [], values: [] as number[] };
+    const labels = currentProduction.data.map((p) =>
+      formatLabel(p.timestamp, timeframe),
+    );
+    const values = currentProduction.data.map((p) => {
+      const converted = toDisplayUnit(p.value, currentProduction.unit, system);
       return Number.isNaN(converted) ? p.value : converted;
     });
     return { labels, values };
-  }, [production, timeframe, system]);
+  }, [currentProduction, timeframe, system]);
 
-  const totalConverted = production
+  const totalConverted = currentProduction
     ? (() => {
-        const c = toDisplayUnit(production.total, production.unit, system);
-        return Number.isNaN(c) ? production.total : c;
+        const c = toDisplayUnit(
+          currentProduction.total,
+          currentProduction.unit,
+          system,
+        );
+        return Number.isNaN(c) ? currentProduction.total : c;
       })()
     : 0;
 
   // If unit recognition failed, show the API's reported unit verbatim.
   const effectiveUnit =
-    production &&
-    Number.isNaN(toDisplayUnit(production.total, production.unit, system))
-      ? production.unit
+    currentProduction &&
+    Number.isNaN(
+      toDisplayUnit(currentProduction.total, currentProduction.unit, system),
+    )
+      ? currentProduction.unit
       : displayUnit;
 
   // Current flow rate per minute — derived from the most recent bucket
   // of the loaded series, scaled by how many minutes that bucket covers.
-  const flowPerMinute = production
+  const flowPerMinute = currentProduction
     ? (() => {
-        const last = production.data[production.data.length - 1];
+        const last =
+          currentProduction.data[currentProduction.data.length - 1];
         if (!last) return 0;
-        const converted = toDisplayUnit(last.value, production.unit, system);
+        const converted = toDisplayUnit(
+          last.value,
+          currentProduction.unit,
+          system,
+        );
         const raw = Number.isNaN(converted) ? last.value : converted;
         return raw / BUCKET_MINUTES[timeframe];
       })()
@@ -258,7 +283,7 @@ export default function OpsMonitor() {
                 <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
                   Total Water Produced
                 </div>
-                {loading ? (
+                {isWaitingForFreshData ? (
                   <div className="mt-3 h-16 w-64 animate-pulse rounded bg-slate-200" />
                 ) : error ? (
                   <div className="mt-3 font-display text-2xl font-bold text-slate-400">
@@ -283,7 +308,7 @@ export default function OpsMonitor() {
                 <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
                   Flow Per Minute
                 </div>
-                {loading ? (
+                {isWaitingForFreshData ? (
                   <div className="mt-3 h-9 w-40 animate-pulse rounded bg-slate-200" />
                 ) : error ? (
                   <div className="mt-3 font-display text-xl font-bold text-slate-400">
@@ -331,7 +356,7 @@ export default function OpsMonitor() {
           {/* Chart */}
           <div className="mt-4 -mx-2 overflow-x-auto px-2 sm:mx-0 sm:overflow-visible sm:px-0">
             <div className="relative h-60 min-h-[240px] min-w-[420px] sm:min-w-0">
-              {loading ? (
+              {isWaitingForFreshData ? (
                 <div className="flex h-full items-center justify-center text-sm text-slate-400">
                   Loading live telemetry…
                 </div>
@@ -345,7 +370,10 @@ export default function OpsMonitor() {
                   </span>
                 </div>
               ) : (
-                <Line data={data} options={options} />
+                // key={timeframe} forces Chart.js to remount on timeframe
+                // change so the new data shape (e.g. 60 vs 24 buckets) gets
+                // a fresh chart instance instead of animating between them.
+                <Line key={timeframe} data={data} options={options} />
               )}
             </div>
           </div>
