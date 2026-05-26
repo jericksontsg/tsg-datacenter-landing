@@ -3,7 +3,7 @@ import MarketContext from "@/components/MarketContext";
 import TSGDifference from "@/components/TSGDifference";
 import Services from "@/components/Services";
 import ByTheNumbers from "@/components/ByTheNumbers";
-import WaterCalculator from "@/components/WaterCalculator";
+import WaterExpertise from "@/components/WaterExpertise";
 import OpsMonitor from "@/components/OpsMonitor";
 import HowWeEngage from "@/components/HowWeEngage";
 import ContactForm from "@/components/ContactForm";
@@ -18,7 +18,7 @@ export default function Home() {
       <Services />
       <ByTheNumbers />
       <OpsMonitor />
-      <WaterCalculator />
+      <WaterExpertise />
       <HowWeEngage />
       <ContactForm />
       <SiteFooter />
