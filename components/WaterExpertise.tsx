@@ -104,7 +104,7 @@ export default function WaterExpertise() {
           <Capability
             icon={ThermometerIcon}
             title="Heat-rejection design"
-            body="Matching wet-tower, hybrid, dry-cooler, or economized architectures to a site's climate and load profile. The dominant lever for total water draw — the right architecture can shift intake by an order of magnitude before any reuse is even considered."
+            body="Matching wet-tower, hybrid, or dry-cooler, to an economizer or chiller (for example mechanical vapor or absorption) architecture based on the site's climate and load profile. The dominant lever for total water draw and energy consumption — the right architecture can shift intake by an order of magnitude before any reuse is even considered."
           />
           <Capability
             icon={RecycleIcon}
